@@ -33,6 +33,8 @@ public abstract class RescorerBuilder<RB extends RescorerBuilder<RB>>
     protected Integer windowSize;
 
     private static final ParseField WINDOW_SIZE_FIELD = new ParseField("window_size");
+    private static final ParseField QUERY_FIELD = new ParseField("query");
+    private static final ParseField SCRIPT_FIELD = new ParseField("script");
 
     /**
      * Construct an empty RescoreBuilder.
@@ -80,7 +82,11 @@ public abstract class RescorerBuilder<RB extends RescorerBuilder<RB>>
                     throw new ParsingException(parser.getTokenLocation(), "rescore doesn't support [" + fieldName + "]");
                 }
             } else if (token == XContentParser.Token.START_OBJECT) {
-                rescorer = parser.namedObject(RescorerBuilder.class, fieldName, null);
+                if (QUERY_FIELD.match(fieldName, parser.getDeprecationHandler())) {
+                    rescorer = parser.namedObject(QueryRescorerBuilder.class, fieldName, null);
+                } else if (SCRIPT_FIELD.match(fieldName, parser.getDeprecationHandler())) {
+                    rescorer = parser.namedObject(ScriptRescorerBuilder.class, fieldName, null);
+                }
             } else {
                 throw new ParsingException(parser.getTokenLocation(), "unexpected token [" + token + "] after [" + fieldName + "]");
             }
