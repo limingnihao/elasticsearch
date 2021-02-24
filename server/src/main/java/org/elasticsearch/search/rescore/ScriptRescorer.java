@@ -8,16 +8,10 @@
 
 package org.elasticsearch.search.rescore;
 
-import org.apache.lucene.search.Explanation;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.*;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Set;
+import java.util.*;
 
 import static java.util.stream.Collectors.toSet;
 
@@ -33,7 +27,7 @@ public class ScriptRescorer implements Rescorer {
             return topDocs;
         }
 
-        final QueryRescorer.QueryRescoreContext rescore = (QueryRescorer.QueryRescoreContext) rescoreContext;
+        final ScriptRescorer.ScriptRescoreContext rescore = (ScriptRescorer.ScriptRescoreContext) rescoreContext;
 
         org.apache.lucene.search.Rescorer rescorer = new org.apache.lucene.search.QueryRescorer(rescore.query()) {
 
@@ -109,9 +103,24 @@ public class ScriptRescorer implements Rescorer {
     }
 
     public static class ScriptRescoreContext extends RescoreContext {
+        private Query query;
 
         public ScriptRescoreContext(int windowSize) {
             super(windowSize, ScriptRescorer.INSTANCE);
         }
+
+        public void setQuery(Query query) {
+            this.query = query;
+        }
+
+        @Override
+        public List<Query> getQueries() {
+            return Collections.singletonList(query);
+        }
+
+        public Query query() {
+            return query;
+        }
+
     }
 }
