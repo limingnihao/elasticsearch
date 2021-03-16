@@ -83,9 +83,9 @@ public abstract class RescorerBuilder<RB extends RescorerBuilder<RB>>
                 }
             } else if (token == XContentParser.Token.START_OBJECT) {
                 if (QUERY_FIELD.match(fieldName, parser.getDeprecationHandler())) {
-                    rescorer = parser.namedObject(QueryRescorerBuilder.class, fieldName, null);
+                    rescorer = QueryRescorerBuilder.fromXContent(parser);
                 } else if (SCRIPT_FIELD.match(fieldName, parser.getDeprecationHandler())) {
-                    rescorer = parser.namedObject(ScriptRescorerBuilder.class, fieldName, null);
+                    rescorer = ScriptRescorerBuilder.fromXContent(parser);
                 }
             } else {
                 throw new ParsingException(parser.getTokenLocation(), "unexpected token [" + token + "] after [" + fieldName + "]");

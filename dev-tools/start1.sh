@@ -12,14 +12,32 @@ home=/Volumes/Software/Elasticsearch/data/es1
 
 esPath=$path/distribution/archives/darwin-tar/build/install/elasticsearch-8.0.0-SNAPSHOT
 
+ikPath=/Volumes/Workspace/workspace_github/_elastic/elasticsearch-analysis-ik/target/releases
+idVersion=elasticsearch-analysis-ik-8.0.0-SNAPSHOT
+
+serverPath=$path/server/build/distributions
+
+mkdir $home/data
+mkdir $home/logs
+
+cp -R $serverPath/elasticsearch-8.0.0-SNAPSHOT.jar $esPath/lib
+
+# copy ik
+#rm -rf $esPath/plugins/*
+#mkdir $esPath/plugins
+#unzip -d $esPath/plugins/ik $ikPath/$idVersion.zip
+
 portDebug=5001
 
-mkdir $home
-mkdir $home/logs
+echo "cluster.name: my-application" >  $esPath/config/elasticsearch.yml
+echo "node.name: node-1"            >> $esPath/config/elasticsearch.yml
+echo "http.port: 9200"              >> $esPath/config/elasticsearch.yml
+echo "path.data: "$home/data        >> $esPath/config/elasticsearch.yml
+echo "path.logs: "$home/logs        >> $esPath/config/elasticsearch.yml
+
+export ES_JAVA_OPTS="-Xms2g -Xmx2g -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=9201 "
 
 source ~/.bash_profile
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-14.0.1.jdk/Contents/Home
-echo $JAVE_HOME
-
 
 $esPath/bin/elasticsearch
