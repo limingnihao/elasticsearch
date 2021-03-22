@@ -12,8 +12,8 @@ home=/Volumes/Software/Elasticsearch/data/es1
 
 esPath=$path/distribution/archives/darwin-tar/build/install/elasticsearch-8.0.0-SNAPSHOT
 
-ikPath=/Volumes/Workspace/workspace_github/_elastic/elasticsearch-analysis-ik/target/releases
-idVersion=elasticsearch-analysis-ik-8.0.0-SNAPSHOT
+ikPath=/Volumes/Software/Elasticsearch/ik
+payloadPath=$path/plugins/query-payload/build
 
 serverPath=$path/server/build/distributions
 
@@ -23,9 +23,14 @@ mkdir $home/logs
 cp -R $serverPath/elasticsearch-8.0.0-SNAPSHOT.jar $esPath/lib
 
 # copy ik
-#rm -rf $esPath/plugins/*
-#mkdir $esPath/plugins
-#unzip -d $esPath/plugins/ik $ikPath/$idVersion.zip
+rm -rf $esPath/plugins/*
+mkdir $esPath/plugins/ik
+cp -R $ikPath/* $esPath/plugins/ik
+
+# copy payload
+mkdir $esPath/plugins/payload
+cp -R $payloadPath/generated-resources/* $esPath/plugins/payload
+cp -R $payloadPath/distributions/*.jar $esPath/plugins/payload
 
 portDebug=5001
 
