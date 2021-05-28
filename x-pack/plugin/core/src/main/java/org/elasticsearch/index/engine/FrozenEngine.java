@@ -49,14 +49,14 @@ public final class FrozenEngine extends ReadOnlyEngine {
     private volatile ElasticsearchDirectoryReader lastOpenedReader;
     private final ElasticsearchDirectoryReader canMatchReader;
 
-    public FrozenEngine(EngineConfig config, boolean requireCompleteHistory) {
-        this(config, null, null, true, Function.identity(), requireCompleteHistory);
+    public FrozenEngine(EngineConfig config, boolean requireCompleteHistory, boolean lazilyLoadSoftDeletes) {
+        this(config, null, null, true, Function.identity(), requireCompleteHistory, lazilyLoadSoftDeletes);
     }
 
     public FrozenEngine(EngineConfig config, SeqNoStats seqNoStats, TranslogStats translogStats, boolean obtainLock,
-                        Function<DirectoryReader, DirectoryReader> readerWrapperFunction, boolean requireCompleteHistory) {
-        super(config, seqNoStats, translogStats, obtainLock, readerWrapperFunction, requireCompleteHistory);
-
+                        Function<DirectoryReader, DirectoryReader> readerWrapperFunction, boolean requireCompleteHistory,
+                        boolean lazilyLoadSoftDeletes) {
+        super(config, seqNoStats, translogStats, obtainLock, readerWrapperFunction, requireCompleteHistory, lazilyLoadSoftDeletes);
         boolean success = false;
         Directory directory = store.directory();
         try (DirectoryReader reader = openDirectory(directory)) {
@@ -69,7 +69,7 @@ public final class FrozenEngine extends ReadOnlyEngine {
             }
             this.docsStats = docsStats(reader);
             canMatchReader = ElasticsearchDirectoryReader.wrap(
-                new RewriteCachingDirectoryReader(directory, reader.leaves()), config.getShardId());
+                new RewriteCachingDirectoryReader(directory, reader.leaves(), null), config.getShardId());
             success = true;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -85,7 +85,7 @@ public final class FrozenEngine extends ReadOnlyEngine {
         // we fake an empty DirectoryReader for the ReadOnlyEngine. this reader is only used
         // to initialize the reference manager and to make the refresh call happy which is essentially
         // a no-op now
-        return new DirectoryReader(indexCommit.getDirectory(), new LeafReader[0]) {
+        return new DirectoryReader(indexCommit.getDirectory(), new LeafReader[0], null) {
             @Override
             protected DirectoryReader doOpenIfChanged() {
                 return null;
@@ -173,9 +173,10 @@ public final class FrozenEngine extends ReadOnlyEngine {
     }
 
     @SuppressForbidden(reason = "we manage references explicitly here")
-    private synchronized ElasticsearchDirectoryReader getReader() {
-        if (lastOpenedReader != null && lastOpenedReader.tryIncRef()) {
-            return lastOpenedReader;
+    private ElasticsearchDirectoryReader getReader() {
+        final ElasticsearchDirectoryReader readerRef = lastOpenedReader; // volatile read
+        if (readerRef != null && readerRef.tryIncRef()) {
+            return readerRef;
         }
         return null;
     }
@@ -222,6 +223,7 @@ public final class FrozenEngine extends ReadOnlyEngine {
             case "segments":
             case "segments_stats":
             case "completion_stats":
+            case FIELD_RANGE_SEARCH_SOURCE: // special case for field_range - we use the cached point values reader
             case CAN_MATCH_SEARCH_SOURCE: // special case for can_match phase - we use the cached point values reader
                 maybeOpenReader = false;
                 break;
@@ -230,7 +232,7 @@ public final class FrozenEngine extends ReadOnlyEngine {
         }
         ElasticsearchDirectoryReader reader = maybeOpenReader ? getOrOpenReader() : getReader();
         if (reader == null) {
-            if (CAN_MATCH_SEARCH_SOURCE.equals(source)) {
+            if (CAN_MATCH_SEARCH_SOURCE.equals(source) || FIELD_RANGE_SEARCH_SOURCE.equals(source)) {
                 canMatchReader.incRef();
                 return new Searcher(source, canMatchReader, engineConfig.getSimilarity(), engineConfig.getQueryCache(),
                     engineConfig.getQueryCachingPolicy(), canMatchReader::decRef);
@@ -252,7 +254,7 @@ public final class FrozenEngine extends ReadOnlyEngine {
             final SegmentsStats stats = new SegmentsStats();
             stats.add(this.segmentsStats);
             if (includeSegmentFileSizes == false) {
-                stats.clearFileSizes();
+                stats.clearFiles();
             }
             return stats;
         } else {

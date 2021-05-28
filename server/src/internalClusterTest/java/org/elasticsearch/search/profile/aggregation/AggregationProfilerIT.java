@@ -17,6 +17,7 @@ import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInter
 import org.elasticsearch.search.aggregations.bucket.range.RangeAggregator;
 import org.elasticsearch.search.aggregations.bucket.sampler.DiversifiedOrdinalsSamplerAggregator;
 import org.elasticsearch.search.aggregations.bucket.terms.GlobalOrdinalsStringTermsAggregator;
+import org.elasticsearch.search.aggregations.metrics.MaxAggregationBuilder;
 import org.elasticsearch.search.profile.ProfileResult;
 import org.elasticsearch.search.profile.ProfileShardResult;
 import org.elasticsearch.test.ESIntegTestCase;
@@ -41,6 +42,8 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasEntry;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 
 @ESIntegTestCase.SuiteScopeTestCase
@@ -222,12 +225,7 @@ public class AggregationProfilerIT extends ESIntegTestCase {
         assertThat(termsAggResult.getDebugInfo(), hasEntry(COLLECTION_STRAT, "remap using many bucket ords"));
         assertThat(termsAggResult.getDebugInfo(), hasEntry(RESULT_STRAT, "terms"));
         assertThat(termsAggResult.getDebugInfo(), hasEntry(HAS_FILTER, false));
-        // TODO we only index single valued docs but the ordinals ends up with multi valued sometimes
-        assertThat(
-            termsAggResult.getDebugInfo().toString(),
-            (int) termsAggResult.getDebugInfo().get(SEGMENTS_WITH_SINGLE) + (int) termsAggResult.getDebugInfo().get(SEGMENTS_WITH_MULTI),
-            greaterThan(0)
-        );
+        assertThat(termsAggResult.getDebugInfo().toString(), (int) termsAggResult.getDebugInfo().get(SEGMENTS_WITH_SINGLE), greaterThan(0));
     }
 
     public void testMultiLevelProfileBreadthFirst() {
@@ -593,7 +591,9 @@ public class AggregationProfilerIT extends ESIntegTestCase {
 
         SearchResponse response = client().prepareSearch("dateidx")
             .setProfile(true)
-            .addAggregation(new DateHistogramAggregationBuilder("histo").field("date").calendarInterval(DateHistogramInterval.MONTH))
+            .addAggregation(new DateHistogramAggregationBuilder("histo").field("date").calendarInterval(DateHistogramInterval.MONTH)
+                // Add a sub-agg so we don't get to use metadata. That's great and all, but it outputs less debugging info for us to verify.
+                .subAggregation(new MaxAggregationBuilder("m").field("date")))
             .get();
         assertSearchResponse(response);
         Map<String, ProfileShardResult> profileResults = response.getProfileResults();
@@ -610,7 +610,7 @@ public class AggregationProfilerIT extends ESIntegTestCase {
             assertThat(histoAggResult, notNullValue());
             assertThat(histoAggResult.getQueryName(), equalTo("DateHistogramAggregator.FromDateRange"));
             assertThat(histoAggResult.getLuceneDescription(), equalTo("histo"));
-            assertThat(histoAggResult.getProfiledChildren().size(), equalTo(0));
+            assertThat(histoAggResult.getProfiledChildren().size(), equalTo(1));
             assertThat(histoAggResult.getTime(), greaterThan(0L));
             Map<String, Long> breakdown = histoAggResult.getTimeBreakdown();
             assertThat(breakdown, notNullValue());
@@ -633,10 +633,16 @@ public class AggregationProfilerIT extends ESIntegTestCase {
             assertThat(delegate.get("delegate"), equalTo("FiltersAggregator.FilterByFilter"));
             Map<?, ?> delegateDebug = (Map<?, ?>) delegate.get("delegate_debug");
             assertThat(delegateDebug, hasEntry("segments_with_deleted_docs", 0));
-            assertThat(delegateDebug, hasEntry("segments_with_doc_count", 0));
+            assertThat(delegateDebug, hasEntry("segments_with_doc_count_field", 0));
             assertThat(delegateDebug, hasEntry("max_cost", (long) RangeAggregator.DOCS_PER_RANGE_TO_USE_FILTERS * 2));
             assertThat(delegateDebug, hasEntry("estimated_cost", (long) RangeAggregator.DOCS_PER_RANGE_TO_USE_FILTERS * 2));
             assertThat((long) delegateDebug.get("estimate_cost_time"), greaterThanOrEqualTo(0L));  // ~1,276,734 nanos is normal
+            List<?> filtersDebug = (List<?>) delegateDebug.get("filters");
+            assertThat(filtersDebug, hasSize(1));
+            Map<?, ?> queryDebug = (Map<?, ?>) filtersDebug.get(0);
+            assertThat(queryDebug, hasKey("scorers_prepared_while_estimating_cost"));
+            assertThat((int) queryDebug.get("scorers_prepared_while_estimating_cost"), greaterThan(0));
+            assertThat(queryDebug, hasEntry("query", "DocValuesFieldExistsQuery [field=date]"));
         }
     }
 }

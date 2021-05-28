@@ -75,7 +75,7 @@ public class DefaultRestChannel extends AbstractRestChannel implements RestChann
     @Override
     public void sendResponse(RestResponse restResponse) {
         // We're sending a response so we know we won't be needing the request content again and release it
-        Releasables.closeWhileHandlingException(httpRequest::release);
+        httpRequest.release();
 
         final ArrayList<Releasable> toClose = new ArrayList<>(3);
         if (HttpUtils.shouldCloseConnection(httpRequest)) {
@@ -90,6 +90,7 @@ public class DefaultRestChannel extends AbstractRestChannel implements RestChann
             if (content instanceof Releasable) {
                 toClose.add((Releasable) content);
             }
+            toClose.add(this::releaseOutputBuffer);
 
             BytesReference finalContent = content;
             try {
@@ -121,11 +122,6 @@ public class DefaultRestChannel extends AbstractRestChannel implements RestChann
             setHeaderField(httpResponse, CONTENT_LENGTH, contentLength, false);
 
             addCookies(httpResponse);
-
-            BytesStreamOutput bytesStreamOutput = bytesOutputOrNull();
-            if (bytesStreamOutput instanceof ReleasableBytesStreamOutput) {
-                toClose.add((Releasable) bytesStreamOutput);
-            }
 
             ActionListener<Void> listener = ActionListener.wrap(() -> Releasables.close(toClose));
             httpChannel.sendResponse(httpResponse, listener);

@@ -18,6 +18,7 @@ import org.apache.lucene.util.CollectionUtil;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ResourceAlreadyExistsException;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.indices.stats.CommonStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
@@ -39,7 +40,6 @@ import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
-import org.elasticsearch.common.io.FileSystemUtils;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
@@ -89,6 +89,7 @@ import org.elasticsearch.index.flush.FlushStats;
 import org.elasticsearch.index.get.GetStats;
 import org.elasticsearch.index.mapper.DateFieldMapper;
 import org.elasticsearch.index.mapper.IdFieldMapper;
+import org.elasticsearch.index.mapper.MapperRegistry;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.MappingLookup;
 import org.elasticsearch.index.merge.MergeStats;
@@ -111,7 +112,6 @@ import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.indices.breaker.CircuitBreakerService;
 import org.elasticsearch.indices.cluster.IndicesClusterStateService;
 import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
-import org.elasticsearch.indices.mapper.MapperRegistry;
 import org.elasticsearch.indices.recovery.PeerRecoveryTargetService;
 import org.elasticsearch.indices.recovery.RecoveryState;
 import org.elasticsearch.indices.store.CompositeIndexFoldersDeletionListener;
@@ -604,7 +604,7 @@ public class IndicesService extends AbstractLifecycleComponent
             // double check that shard is not created.
             new IndexEventListener() {
                 @Override
-                public void beforeIndexShardCreated(ShardId shardId, Settings indexSettings) {
+                public void beforeIndexShardCreated(ShardRouting shardRouting, Settings indexSettings) {
                     assert false : "temp index should not trigger shard creation";
                     throw new ElasticsearchException("temp index should not trigger shard creation [{}]", index);
                 }
@@ -934,7 +934,7 @@ public class IndicesService extends AbstractLifecycleComponent
             }
             // this is a pure protection to make sure this index doesn't get re-imported as a dangling index.
             // we should in the future rather write a tombstone rather than wiping the metadata.
-            MetadataStateFormat.deleteMetaState(nodeEnv.indexPaths(index));
+            MetadataStateFormat.deleteMetaState(nodeEnv.indexPath(index));
         }
     }
 
@@ -976,7 +976,7 @@ public class IndicesService extends AbstractLifecycleComponent
             throw new IllegalStateException("Can't delete shard " + shardId + " (cause: " + shardDeletionCheckResult + ")");
         }
         nodeEnv.deleteShardDirectorySafe(shardId, indexSettings,
-            paths -> indexFoldersDeletionListeners.beforeShardFoldersDeleted(shardId, indexSettings, paths));
+            path -> indexFoldersDeletionListeners.beforeShardFoldersDeleted(shardId, indexSettings, path));
         logger.debug("{} deleted shard reason [{}]", shardId, reason);
 
         if (canDeleteIndexContents(shardId.getIndex(), indexSettings)) {
@@ -1027,7 +1027,7 @@ public class IndicesService extends AbstractLifecycleComponent
         if (clusterState.metadata().index(index) != null) {
             throw new IllegalStateException("Cannot delete index [" + index + "], it is still part of the cluster state.");
         }
-        if (nodeEnv.hasNodeFile() && FileSystemUtils.exists(nodeEnv.indexPaths(index))) {
+        if (nodeEnv.hasNodeFile() && Files.exists(nodeEnv.indexPath(index))) {
             final IndexMetadata metadata;
             try {
                 metadata = metaStateService.loadIndexState(index);
@@ -1082,7 +1082,7 @@ public class IndicesService extends AbstractLifecycleComponent
         } else {
             // lets see if it's path is available (return false if the shard doesn't exist)
             // we don't need to delete anything that is not there
-            return FileSystemUtils.exists(nodeEnv.availableShardPaths(shardId)) ?
+            return Files.exists(nodeEnv.availableShardPath(shardId)) ?
                 ShardDeletionCheckResult.FOLDER_FOUND_CAN_DELETE :
                 ShardDeletionCheckResult.NO_FOLDER_FOUND;
         }
@@ -1576,6 +1576,20 @@ public class IndicesService extends AbstractLifecycleComponent
     }
 
     /**
+     * Returns the registered metadata field names for the provided compatible {@link Version}.
+     */
+    public Set<String> getMetadataFields(Version version) {
+        return mapperRegistry.getMetadataMapperParsers(version).keySet();
+    }
+
+    /**
+     * Returns the registered metadata field names for all compatible versions.
+     */
+    public Set<String> getAllMetadataFields() {
+        return mapperRegistry.getAllMetadataMapperParsers().keySet();
+    }
+
+    /**
      * Returns <code>true</code> if fielddata is enabled for the {@link IdFieldMapper} field, <code>false</code> otherwise.
      */
     public boolean isIdFieldDataEnabled() {
@@ -1587,7 +1601,7 @@ public class IndicesService extends AbstractLifecycleComponent
     }
 
     private void updateDanglingIndicesInfo(Index index) {
-        assert DiscoveryNode.isDataNode(settings) : "dangling indices information should only be persisted on data nodes";
+        assert DiscoveryNode.canContainData(settings) : "dangling indices information should only be persisted on data nodes";
         assert nodeWriteDanglingIndicesInfo : "writing dangling indices info is not enabled";
         assert danglingIndicesThreadPoolExecutor != null : "executor for dangling indices info is not available";
         if (danglingIndicesToWrite.add(index)) {

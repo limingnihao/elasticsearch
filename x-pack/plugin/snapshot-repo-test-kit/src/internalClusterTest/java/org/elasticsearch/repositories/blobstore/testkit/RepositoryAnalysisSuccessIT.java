@@ -17,6 +17,7 @@ import org.elasticsearch.common.blobstore.BlobStore;
 import org.elasticsearch.common.blobstore.DeleteResult;
 import org.elasticsearch.common.blobstore.support.PlainBlobMetadata;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.BigArrays;
@@ -40,6 +41,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
@@ -49,12 +51,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
+
+    private static final String BASE_PATH_SETTING_KEY = "base_path";
 
     @Before
     public void suppressConsistencyChecks() {
@@ -66,12 +71,18 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
         return List.of(TestPlugin.class, LocalStateCompositeXPackPlugin.class, SnapshotRepositoryTestKit.class);
     }
 
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/69219")
     public void testRepositoryAnalysis() {
 
-        createRepositoryNoVerify("test-repo", TestPlugin.ASSERTING_REPO_TYPE);
+        final Settings.Builder settings = Settings.builder();
+        if (randomBoolean()) {
+            settings.put(BASE_PATH_SETTING_KEY, randomAlphaOfLength(10));
+        }
 
-        final AssertingBlobStore blobStore = new AssertingBlobStore();
+        assertAcked(
+            clusterAdmin().preparePutRepository("test-repo").setVerify(false).setType(TestPlugin.ASSERTING_REPO_TYPE).setSettings(settings)
+        );
+
+        final AssertingBlobStore blobStore = new AssertingBlobStore(settings.get(BASE_PATH_SETTING_KEY));
         for (final RepositoriesService repositoriesService : internalCluster().getInstances(RepositoriesService.class)) {
             try {
                 ((AssertingRepository) repositoriesService.repository("test-repo")).setBlobStore(blobStore);
@@ -99,11 +110,13 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
         }
 
         if (usually()) {
-            request.maxTotalDataSize(new ByteSizeValue(between(1, 1 << 20)));
+            request.maxTotalDataSize(
+                new ByteSizeValue(request.getMaxBlobSize().getBytes() + request.getBlobCount() - 1 + between(0, 1 << 20))
+            );
             blobStore.ensureMaxTotalBlobSize(request.getMaxTotalDataSize().getBytes());
         }
 
-        request.timeout(TimeValue.timeValueSeconds(5));
+        request.timeout(TimeValue.timeValueSeconds(20));
 
         final RepositoryAnalyzeAction.Response response = client().execute(RepositoryAnalyzeAction.INSTANCE, request)
             .actionGet(30L, TimeUnit.SECONDS);
@@ -132,9 +145,18 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
                     clusterService,
                     bigArrays,
                     recoverySettings,
-                    new BlobPath()
+                    buildBlobPath(metadata.settings())
                 )
             );
+        }
+    }
+
+    private static BlobPath buildBlobPath(Settings settings) {
+        final String basePath = settings.get(BASE_PATH_SETTING_KEY);
+        if (basePath == null) {
+            return BlobPath.EMPTY;
+        } else {
+            return BlobPath.EMPTY.add(basePath);
         }
     }
 
@@ -166,6 +188,7 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
     }
 
     static class AssertingBlobStore implements BlobStore {
+        private final String pathPrefix;
 
         @Nullable // if no current blob container
         private String currentPath;
@@ -178,9 +201,13 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
         private long maxBlobSize = new RepositoryAnalyzeAction.Request("dummy").getMaxBlobSize().getBytes();
         private long maxTotalBlobSize = new RepositoryAnalyzeAction.Request("dummy").getMaxTotalDataSize().getBytes();
 
+        AssertingBlobStore(@Nullable String basePath) {
+            this.pathPrefix = basePath == null ? "" : basePath + "/";
+        }
+
         @Override
         public BlobContainer blobContainer(BlobPath path) {
-            assertThat(path.buildAsString(), startsWith("temp-analysis-"));
+            assertThat(path.buildAsString(), startsWith(pathPrefix + "temp-analysis-"));
 
             synchronized (this) {
                 if (currentPath == null) {
@@ -337,8 +364,8 @@ public class RepositoryAnalysisSuccessIT extends AbstractSnapshotIntegTestCase {
         }
 
         @Override
-        public void deleteBlobsIgnoringIfNotExists(List<String> blobNames) {
-            blobs.keySet().removeAll(blobNames);
+        public void deleteBlobsIgnoringIfNotExists(Iterator<String> blobNames) {
+            blobNames.forEachRemaining(blobs.keySet()::remove);
         }
 
         @Override

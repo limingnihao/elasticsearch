@@ -10,7 +10,6 @@ package org.elasticsearch.gradle.testclusters;
 import org.elasticsearch.gradle.FileSupplier;
 import org.elasticsearch.gradle.PropertyNormalization;
 import org.elasticsearch.gradle.ReaperService;
-import org.elasticsearch.gradle.http.WaitForHttpResource;
 import org.gradle.api.Named;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
@@ -54,21 +53,23 @@ public class ElasticsearchCluster implements TestClusterConfiguration, Named {
     private final File workingDirBase;
     private final LinkedHashMap<String, Predicate<TestClusterConfiguration>> waitConditions = new LinkedHashMap<>();
     private final Project project;
-    private final ReaperService reaper;
+    private final Provider<ReaperService> reaper;
     private final FileSystemOperations fileSystemOperations;
     private final ArchiveOperations archiveOperations;
     private final ExecOperations execOperations;
+    private final Provider<File> runtimeJava;
     private int nodeIndex = 0;
 
     public ElasticsearchCluster(
         String path,
         String clusterName,
         Project project,
-        ReaperService reaper,
+        Provider<ReaperService> reaper,
         FileSystemOperations fileSystemOperations,
         ArchiveOperations archiveOperations,
         ExecOperations execOperations,
-        File workingDirBase
+        File workingDirBase,
+        Provider<File> runtimeJava
     ) {
         this.path = path;
         this.clusterName = clusterName;
@@ -78,6 +79,7 @@ public class ElasticsearchCluster implements TestClusterConfiguration, Named {
         this.archiveOperations = archiveOperations;
         this.execOperations = execOperations;
         this.workingDirBase = workingDirBase;
+        this.runtimeJava = runtimeJava;
         this.nodes = project.container(ElasticsearchNode.class);
         this.nodes.add(
             new ElasticsearchNode(
@@ -89,7 +91,8 @@ public class ElasticsearchCluster implements TestClusterConfiguration, Named {
                 fileSystemOperations,
                 archiveOperations,
                 execOperations,
-                workingDirBase
+                workingDirBase,
+                runtimeJava
             )
         );
 
@@ -120,15 +123,22 @@ public class ElasticsearchCluster implements TestClusterConfiguration, Named {
                     fileSystemOperations,
                     archiveOperations,
                     execOperations,
-                    workingDirBase
+                    workingDirBase,
+                    runtimeJava
                 )
             );
         }
     }
 
     @Internal
-    ElasticsearchNode getFirstNode() {
+    public ElasticsearchNode getFirstNode() {
         return nodes.getAt(clusterName + "-0");
+    }
+
+    @Internal
+    public ElasticsearchNode getLastNode() {
+        int index = nodes.size() - 1;
+        return nodes.getAt(clusterName + "-" + index);
     }
 
     @Internal

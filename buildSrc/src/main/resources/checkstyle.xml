@@ -28,7 +28,7 @@
     characters then it'll need to scroll. This fails the build if it sees
     such snippets.
   -->
-  <module name="org.elasticsearch.gradle.checkstyle.SnippetLengthCheck">
+  <module name="org.elasticsearch.gradle.internal.checkstyle.SnippetLengthCheck">
     <property name="id" value="SnippetLength" />
     <property name="max" value="76" />
   </module>
@@ -130,7 +130,6 @@
         <property name="tokens" value="EXPR"/>
         <property name="limitedTokens" value="LNOT"/>
         <property name="maximumNumber" value="0"/>
-        <property name="maximumDepth" value="2"/>
         <message
             key="descendant.token.max"
             value="Do not negate boolean expressions with '!', but check explicitly with '== false' as it is more explicit"/>
